@@ -9,8 +9,15 @@ from data.gridworld_dynamics import (
 )
 
 
-def make_batch(world, length, batch_size, device):
-    return make_sequence(world, length, batch_size, device)
+def eval_on_world(model, world, length, device):
+    model.eval()
+    with torch.no_grad():
+        seq, target = make_sequence(world, length, batch_size=128, device=device)
+        logits = model(seq)
+        pred = logits.argmax(-1)
+        mask = target != -100
+        acc = (pred[mask] == target[mask]).float().mean().item()
+    return acc
 
 
 def train_one(
@@ -18,7 +25,7 @@ def train_one(
     batch_size=32,
     steps=3000,
     lr=3e-4,
-    log_every=100,
+    log_every=500,
     seed=42,
     device="cuda",
 ):
@@ -33,7 +40,7 @@ def train_one(
     losses = []
     for step in range(1, steps + 1):
         model.train()
-        seq, target = make_batch(world, length, batch_size, device)
+        seq, target = make_sequence(world, length, batch_size, device)
         logits = model(seq)
         loss = F.cross_entropy(
             logits.reshape(-1, VOCAB_SIZE),
@@ -50,17 +57,19 @@ def train_one(
             avg = sum(losses[-log_every:]) / log_every
             print(f"step {step}/{steps}  loss {avg:.4f}  elapsed {time.time()-t0:.0f}s")
 
-    # 评估：单步准确率
-    model.eval()
-    with torch.no_grad():
-        seq, target = make_batch(world, length, 128, device)
-        logits = model(seq)
-        pred = logits.argmax(-1)                    # [B, L]
-        mask = target != -100                       # [B, L]
-        acc = (pred[mask] == target[mask]).float().mean().item()
+    # 保存
+    ckpt_path = "/kaggle/working/world_model.pt"
+    torch.save(model.state_dict(), ckpt_path)
 
-    print(f"params={n_params:,}  single_step_acc={acc:.4f}  time={time.time()-t0:.0f}s")
-    return model, world, acc
+    # 诊断：训练世界 vs 新世界
+    acc_same = eval_on_world(model, make_world(seed=seed), length, device)
+    acc_new = eval_on_world(model, make_world(seed=999), length, device)
+
+    print(f"\nparams={n_params:,}  time={time.time()-t0:.0f}s")
+    print(f"训练世界 acc: {acc_same:.4f}")
+    print(f"全新世界 acc: {acc_new:.4f}   ← 关键")
+    print(f"checkpoint: {ckpt_path}")
+    return model
 
 
 if __name__ == "__main__":
