@@ -14,9 +14,9 @@ def eval_single(model, world, length, device):
     with torch.no_grad():
         seq, target = make_sequence(world, length, batch_size=128, device=device)
         logits = model(seq)
-        pred = logits.argmax(-1)
-        mask = target != -100
-        return (pred[mask] == target[mask]).float().mean().item()
+        pred = logits[:, :-1].argmax(-1)             # [B, L-1]
+        mask = target[:, 1:] != -100                  # [B, L-1]
+        return (pred[mask] == target[:, 1:][mask]).float().mean().item()
 
 
 def eval_rollout(model, world, prefix_len=8, rollout_len=50,
@@ -79,10 +79,10 @@ def train_one(length=32, batch_size=32, steps=3000,
         seq, target = make_sequence(world, length, batch_size, device)
         logits = model(seq)
         loss = F.cross_entropy(
-            logits.reshape(-1, VOCAB_SIZE),
-            target.reshape(-1),
-            ignore_index=-100,
-        )
+    logits[:, :-1].reshape(-1, VOCAB_SIZE),
+    target[:, 1:].reshape(-1),
+    ignore_index=-100,
+)
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
